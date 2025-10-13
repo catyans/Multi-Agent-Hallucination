@@ -1,0 +1,28 @@
+llm:
+  model: Qwen2.5-7B-Instruct
+  api_key: "-"
+  base_url: http://0.0.0.0:8000/v1
+
+# Vector store settings
+vector_store:
+  type: chromadb
+  persistence_path: ./chromadb_bge-m3
+  collection_name: bge-m3-info
+  k: 5
+  score_threshold: 0.1
+  # Embedding function settings
+  embedding:
+    use_custom: true
+    api_key: 
+    model: BAAI/bge-m3
+    api_base: 
+
+# Document indexing settings
+document_indexing:
+  chunk_size: 1024
+  reindex: false
+
+# RAG settings
+rag:
+  num_versions: 5
+  max_retries: 3
