@@ -13,6 +13,9 @@ from autogen_core.models import (
     SystemMessage,
     UserMessage,
 )
+from openai import RateLimitError  # 请根据你的 SDK 版本确认异常路径
+import prompts
+import utils
 class ResponseSelectorAgentConfig(BaseModel):
     name: str
     description: str = "A response validator agent that validates the response of a model."
@@ -47,7 +50,6 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
 
         return final_response
 
-
     async def on_messages_stream(
         self, messages: Sequence[BaseChatMessage], cancellation_token: CancellationToken
     ) -> AsyncGenerator[BaseAgentEvent | BaseChatMessage | Response, None]:
@@ -59,81 +61,58 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
                 inner_messages=[],
             )
             return
-            
+        retrival_task = messages[-2].content
         task = messages[-1].content
         try:
+            retrival_task_data = json.loads(retrival_task)
+            retrieval_context = retrival_task_data["retrieval_context"]
             task_data = json.loads(task)  # 解析 JSON 字符串为字典
             query = task_data.get("query")
             generated_answers = task_data.get("generated_answers")
-            retrieval_results = task_data.get("retrieval_results")
-
-
-            prompt = self.construct_select_prompt(query, generated_answers, retrieval_results)#构造prompt
-            system_message = SystemMessage(
-                content="You are a helpful assistant.",
-                source="system"
-            )
-            user_message = UserMessage(
-                content=prompt,
-                source="user"
-            )
-            model_result = await self._model_client.create(
-                messages=[system_message, user_message]
-            )#调用大模型
-            selected_answer_index = self.extract_selected_answer_index(model_result.content)
+            remaining_answers = generated_answers[:]  # 做个副本避免修改原列表
+            while len(remaining_answers) > 1:
+                try:
+                    prompt = prompts.construct_select_prompt(query, remaining_answers, retrieval_context)
+                    system_message = SystemMessage(
+                        content="You are a helpful assistant.",
+                        source="system"
+                    )
+                    user_message = UserMessage(
+                        content=prompt,
+                        source="user"
+                    )
+                    model_result = await utils._call_model_with_rate_limit_retry(
+                        model_client=self._model_client,
+                        messages=[system_message, user_message]
+                    )#调用大模型
+                    selected_index_in_current = self.extract_selected_answer_index(model_result.content)
+    
+                    # 映射回原始 generated_answers 的索引
+                    if 1 <= selected_index_in_current <= len(remaining_answers):
+                        original_answer = remaining_answers[selected_index_in_current-1]
+                        selected_answer_index = generated_answers.index(original_answer)+1
+                    else:
+                        selected_answer_index = 1  # fallback
+    
+                    break  # 成功选出，跳出循环
+    
+                except Exception as e:
+                    print(f"call_with_retry failed or parsing failed: {e}. Retrying with fewer answers...")
+                    # 移除最后一个答案
+                    remaining_answers = remaining_answers[:-1]
+    
+            # 如果所有 generated_answers 都被移除，只剩一个也没成功
+            if len(remaining_answers) <= 1:
+                selected_answer_index = 1  # fallback 到第一个
         except json.JSONDecodeError as e:
             print("JSON 解析错误:", e)
         except KeyError as e:
             print("缺少必要的键:", e)
-        output = json.dumps({"question": query,"answer": generated_answers[selected_answer_index-1] if selected_answer_index <= len(generated_answers) else generated_answers[0],"retrieval_results": retrieval_results})
+        output = json.dumps({"query": query,"answer": generated_answers[selected_answer_index-1] if selected_answer_index <= len(generated_answers) else generated_answers[0]})
         yield Response(
             chat_message=TextMessage(content=output, source=self.name),
             inner_messages=[],
         )
-
-    def construct_select_prompt(self, query, generated_answers, retrieval_results):
-        """
-        Constructs a prompt in English to ask a LLM to select the best answer from the generated answers.
-        
-        Args:
-            query (str): The user's question.
-            generated_answers (list of str): List of candidate answers to choose from.
-            retrieval_results (list of str or str): Retrieved context snippets (used as reference).
-
-        Returns:
-            str: Formatted prompt in English for the LLM.
-        """
-        prompt = ""
-        prompt += f"Question: {query}\n"
-        # Add retrieval results if available
-        if retrieval_results:
-            if isinstance(retrieval_results, list):
-                for i, context in enumerate(retrieval_results, 1):
-                    prompt += f"Retrieval Context {i}: {context}\n"
-            else:
-                prompt += f"Retrieval Context: {retrieval_results}\n"        
-        # Add generated answers with numbering
-        for i, answer in enumerate(generated_answers, 1):
-            prompt += f"Answer {i}: {answer}\n"
-        
-        # Instructions in English
-        prompt += '''
-    Carefully analyze the content of each provided answer option. Based on the question background, retrieved context, and general knowledge, perform step-by-step reasoning to evaluate the correctness, factual accuracy, and logical consistency of each answer.
-
-    Identify and eliminate options that contain errors, inaccuracies, or inconsistencies. After thorough analysis, select the single most correct and well-supported answer.
-
-    After completing your reasoning, please output the result in the following strict format:
-
-    Reasoning:
-
-    (Provide your detailed step-by-step analysis here)
-
-    Final Answer:
-
-    (Only output the numeric index corresponding to the correct answer, e.g., 1, 2, 3, etc.)
-    '''
-        return prompt.strip()
-
 
     def extract_selected_answer_index(self, response: str) -> int:
         """

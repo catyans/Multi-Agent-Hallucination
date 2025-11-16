@@ -11,6 +11,11 @@ from autogen_core.models import (
     SystemMessage,
     UserMessage,
 )
+from openai import RateLimitError  # 请根据你的 SDK 版本确认异常路径
+import re
+import utils
+import prompts
+
 class ResponseValidatorAgentConfig(BaseModel):
     name: str
     description: str = "A response validator agent that validates the response of a model."
@@ -31,8 +36,6 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
         self._initial_count = count
         self._count = count
         self.terminate_word = "TERMINATE:"
-
-
 
     @property
     def produced_message_types(self) -> Sequence[type[BaseChatMessage]]:
@@ -62,14 +65,15 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
                 inner_messages=[],
             )
             return
-            
+        retrival_task = messages[-3].content    
         task = messages[-1].content
         try:
+            retrival_task_data = json.loads(retrival_task)
+            retrieval_context = retrival_task_data.get("retrieval_context", [])  # 默认为空列表
             task_data = json.loads(task)  # 解析 JSON 字符串为字典
-            question = task_data.get("question")
+            query = task_data.get("query")
             answer = task_data.get("answer")
-            retrieval_results = task_data.get("retrieval_results", [])  # 默认为空列表
-            prompt = self.construct_judgment_prompt(question, retrieval_results, answer)
+            prompt = prompts.construct_validate_prompt(query, retrieval_context, answer)
             if self._count == 0:
                 self._count = self._initial_count
                 yield Response(
@@ -85,7 +89,8 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
                 content=prompt,
                 source="user"
             )
-            model_result = await self._model_client.create(
+            model_result = await utils._call_model_with_rate_limit_retry(
+                model_client=self._model_client,
                 messages=[system_message, user_message]
             )
             judgment = self.extract_answer_as_bool(model_result.content)
@@ -97,60 +102,31 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
             self._count = self._initial_count
             output = self.terminate_word+answer
         else:
-            output = question
+            output = query
         yield Response(
             chat_message=TextMessage(content=output, source=self.name),
             inner_messages=[],
         )
 
-    def construct_judgment_prompt(self,question, retrieval_results, answer):
-        """
-        Constructs a prompt in English to ask a LLM to judge if the answer 
-        can be derived from the retrieval results given the question.
-        
-        Args:
-            question (str): The user's question.
-            retrieval_results (list of str or str): Retrieved context snippets.
-            answer (str): The generated answer to evaluate.
-        
-        Returns:
-            str: Formatted prompt in English for the LLM.
-        """
-        # If retrieval_results is a list, join them into a single string
-        if isinstance(retrieval_results, list):
-            context = "\n\n".join(f"[Snippet {i+1}]: {snippet}" for i, snippet in enumerate(retrieval_results))
-        else:
-            context = retrieval_results
-
-        prompt = f"""\
-        You are an impartial evaluator. Your task is to determine whether the provided answer can be directly supported by the information in the retrieval results for the given question.
-
-        Please follow these steps:
-
-        Read the question carefully.
-        Review the retrieval results (context snippets).
-        Examine the provided answer.
-        Determine if the answer is fully supported — every piece of information in the answer must be explicitly stated or logically inferable from the retrieval results. No external knowledge or speculation.
-        Output your judgment in exactly this format:
-        {{"thought": "Brief reasoning based on context", "answer": "Yes or No"}}
-
-        Question:
-        {question}
-
-        Retrieval Results:
-        {context}
-
-        Answer:
-        {answer}"""
-        
-        return prompt.strip()
     def extract_answer_as_bool(self, response: str) -> bool:
+        if not response or not isinstance(response, str):
+            print("Error parsing response: Empty or non-string response")
+            return False
+    
+        # 尝试提取 JSON 部分（应对模型返回多余文本）
+        import re
+        json_match = re.search(r"\{.*\}", response.strip(), re.DOTALL)
+        if not json_match:
+            print(f"Error parsing response: No JSON object found in: {response[:200]}...")
+            return False
+    
+        json_str = json_match.group(0)
         try:
-            result = json.loads(response)
-            answer_str = result["answer"]
-            return answer_str.strip().lower() == "yes"
-        except (json.JSONDecodeError, KeyError, AttributeError) as e:
-            print(f"Error parsing response: {e}")
+            result = json.loads(json_str)
+            answer_str = result.get("answer", "").strip().lower()
+            return answer_str == "yes"
+        except (json.JSONDecodeError, AttributeError) as e:
+            print(f"Error parsing response: {e}, Raw response: {response[:200]}...")
             return False
 
     async def on_reset(self, cancellation_token: CancellationToken) -> None:

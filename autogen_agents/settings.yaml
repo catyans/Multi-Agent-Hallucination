@@ -10,6 +10,7 @@ vector_store:
   collection_name: bge-m3-info
   k: 5
   score_threshold: 0.1
+  bm25_index_path: "../bm25.pkl"
   # Embedding function settings
   embedding:
     use_custom: true
