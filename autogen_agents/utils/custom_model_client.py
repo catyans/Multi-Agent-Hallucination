@@ -29,28 +29,12 @@ class CustomModelClient:
         )
 
     async def create(self, messages: List[Dict[str, str]]) -> CustomModelResponse:
-        """
-        调用模型生成回复
-        
-        Args:
-            messages: OpenAI 格式的消息列表
-            
-        Returns:
-            CustomModelResponse 对象，可通过 .content 获取字符串结果
-        """
         openai_messages: List[Dict[str, Any]] = []
         for msg in messages:
-            # 提取 content（UserMessage.content 可能是 list，需转为 str 或保留原样？）
             content = msg.content
-            
-            # 处理多模态 content（如 [str, Image]）—— 如果你的模型不支持，可强制转 str
             if isinstance(content, list):
-                # 简单策略：只保留文本部分，或转为字符串（根据后端能力调整）
-                # 这里保守处理：拼接所有字符串元素，忽略 Image（或报错）
                 text_parts = [part for part in content if isinstance(part, str)]
                 content = " ".join(text_parts) if text_parts else ""
-                # 或者 raise ValueError("Multimodal input not supported")
-    
             # 判断角色
             if isinstance(msg, SystemMessage):
                 role = "system"
