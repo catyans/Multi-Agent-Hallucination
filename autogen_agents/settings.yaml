@@ -2,6 +2,7 @@ llm:
   model: Qwen2.5-7B-Instruct
   api_key: "-"
   base_url: http://0.0.0.0:8000/v1
+  base_url_lora: http://0.0.0.0:8001/v1
   lora_name_selector: selector
   lora_name_validator: validator
 # Vector store settings

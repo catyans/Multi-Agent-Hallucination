@@ -1,6 +1,5 @@
 import asyncio
 from openai import RateLimitError
-from .custom_model_client import CustomModelClient, CustomModelResponse
 async def _call_model_with_rate_limit_retry(model_client, messages, max_retries=12, delay=5):
     for attempt in range(max_retries + 1):
         try:

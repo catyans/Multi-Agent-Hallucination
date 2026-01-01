@@ -63,6 +63,11 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
             return
         retrival_task = messages[-2].content
         task = messages[-1].content
+        system_prompt = """你是一个答案选择助手，任务是从给定选项中选出最正确的一个。
+        严格遵守以下规则：
+        1. 仅输出答案内容，必须包括答案的具体内容，不添加任何解释、推理或额外文本。
+        2. 必须基于用户提供的问题和检索到的上下文进行判断，答案不能为空。
+        """
         try:
             retrival_task_data = json.loads(retrival_task)
             retrieval_context = retrival_task_data["retrieval_context"]
@@ -70,11 +75,12 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
             query = task_data.get("query")
             generated_answers = task_data.get("generated_answers")
             remaining_answers = generated_answers[:]  # 做个副本避免修改原列表
+            selected_answer = ""
             while len(remaining_answers) > 1:
                 try:
                     prompt = prompts.construct_select_prompt(query, remaining_answers, retrieval_context)
                     system_message = SystemMessage(
-                        content="You are a helpful assistant.",
+                        content=system_prompt,
                         source="system"
                     )
                     user_message = UserMessage(
@@ -85,30 +91,27 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
                         model_client=self._model_client,
                         messages=[system_message, user_message]
                     )#调用大模型
-                    selected_index_in_current = self.extract_selected_answer_index(model_result.content)
-    
-                    # 映射回原始 generated_answers 的索引
-                    if 1 <= selected_index_in_current <= len(remaining_answers):
-                        original_answer = remaining_answers[selected_index_in_current-1]
-                        selected_answer_index = generated_answers.index(original_answer)+1
-                    else:
-                        selected_answer_index = 1  # fallback
-    
+                    selected_answer = model_result.content
+                    for answer in remaining_answers:
+                        #提取answer中Answer: 后的内容
+                        answer_content = re.search(r"Answer:\s*(.*)", answer, re.IGNORECASE)
+                        if answer_content:
+                            answer_content = answer_content.group(1).strip()                           
+                            if selected_answer in answer_content:
+                                selected_answer = answer
+                                break
+                    
                     break  # 成功选出，跳出循环
     
                 except Exception as e:
                     print(f"call_with_retry failed or parsing failed: {e}. Retrying with fewer answers...")
                     # 移除最后一个答案
                     remaining_answers = remaining_answers[:-1]
-    
-            # 如果所有 generated_answers 都被移除，只剩一个也没成功
-            if len(remaining_answers) <= 1:
-                selected_answer_index = 1  # fallback 到第一个
         except json.JSONDecodeError as e:
             print("JSON 解析错误:", e)
         except KeyError as e:
             print("缺少必要的键:", e)
-        output = json.dumps({"query": query,"answer": generated_answers[selected_answer_index-1] if selected_answer_index <= len(generated_answers) else generated_answers[0]})
+        output = json.dumps({"query": query,"answer": selected_answer})
         yield Response(
             chat_message=TextMessage(content=output, source=self.name),
             inner_messages=[],

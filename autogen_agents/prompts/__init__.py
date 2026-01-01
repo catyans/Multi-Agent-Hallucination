@@ -51,35 +51,13 @@ def construct_select_prompt(query, generated_answers, retrieval_context):
     Returns:
         str: Formatted prompt in English for the LLM.
     """
-    prompt = f"Question: {query}\n"
-    # Add retrieval results if available
-    if retrieval_context:
-        if isinstance(retrieval_context, list):
-            for i, context in enumerate(retrieval_context, 1):
-                prompt += f"Retrieval Context {i}: {context}\n"
-        else:
-            prompt += f"Retrieval Context: {retrieval_context}\n"        
-    # Add generated answers with numbering
+    m = ""
     for i, answer in enumerate(generated_answers, 1):
-        prompt += json.dumps({f"answer{i}": answer})
-    
-    # Instructions in English
-    prompt += '''
-Carefully analyze the content of each provided answer option. Based on the question background, retrieved context, and general knowledge, perform step-by-step reasoning to evaluate the correctness, factual accuracy, and logical consistency of each answer.
-
-Identify and eliminate options that contain errors, inaccuracies, or inconsistencies. After thorough analysis, select the single most correct and well-supported answer.
-
-After completing your reasoning, please output the result in the following strict format:
-
-Reasoning:
-
-(Provide your detailed step-by-step analysis here)
-
-Final Answer:
-
-(Only output the numeric index corresponding to the correct answer, e.g., 1, 2, 3, etc.)
-'''
-    return prompt.strip()
+        m += f"答案 {i}:{answer}\n"
+    user_prompt = f"""用户的问题是：{query}
+            
+            请从以下答案中选择最正确的一个：{m}"""
+    return user_prompt.strip()
 
 def construct_validate_prompt(query, retrieval_context, answer):
     """
@@ -94,31 +72,8 @@ def construct_validate_prompt(query, retrieval_context, answer):
     Returns:
         str: Formatted prompt in English for the LLM.
     """
-    # If retrieval_results is a list, join them into a single string
-    if isinstance(retrieval_context, list):
-        context = "\n\n".join(f"[Snippet {i+1}]: {snippet}" for i, snippet in enumerate(retrieval_context))
-    else:
-        context = retrieval_context
-
-    prompt = f"""\
-    You are an impartial evaluator. Your task is to determine whether the provided answer can be directly supported by the information in the retrieval context for the given question.
-
-    Please follow these steps:
-
-    Read the question carefully.
-    Review the retrieval context (context snippets).
-    Examine the provided answer.
-    Determine if the answer is fully supported — every piece of information in the answer must be explicitly stated or logically inferable from the retrieval context. No external knowledge or speculation.
-    Output your judgment in exactly this format:
-    {{"thought": "Brief reasoning based on context", "answer": "Yes or No"}}
-
-    Question:
-    {query}
-
-    Retrieval Context:  
-    {context}
-
-    Answer:
-    {answer}"""
+    instruction = "Judge whether the given selected answer (containing both thought process and the final deduced answer) is correct based on the query. Respond strictly with either yes or no."
+    input_content = f"Query: {query}\n\nSelected answer: {answer}"
+    prompt = f"{instruction}\n\n{input_content}"
     
     return prompt.strip()

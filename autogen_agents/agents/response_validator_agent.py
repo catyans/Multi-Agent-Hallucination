@@ -73,7 +73,6 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
             task_data = json.loads(task)  # 解析 JSON 字符串为字典
             query = task_data.get("query")
             answer = task_data.get("answer")
-            prompt = prompts.construct_validate_prompt(query, retrieval_context, answer)
             if self._count == 0:
                 self._count = self._initial_count
                 yield Response(
@@ -81,17 +80,14 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
                     inner_messages=[],
                 )
                 return
-            system_message = SystemMessage(
-                content="You are a helpful assistant.",
-                source="system"
-            )
+            prompt = prompts.construct_validate_prompt(query, retrieval_context, answer)
             user_message = UserMessage(
                 content=prompt,
                 source="user"
             )
             model_result = await utils._call_model_with_rate_limit_retry(
                 model_client=self._model_client,
-                messages=[system_message, user_message]
+                messages=[ user_message]
             )
             judgment = self.extract_answer_as_bool(model_result.content)
         except json.JSONDecodeError as e:
@@ -112,22 +108,12 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
         if not response or not isinstance(response, str):
             print("Error parsing response: Empty or non-string response")
             return False
-    
-        # 尝试提取 JSON 部分（应对模型返回多余文本）
-        import re
-        json_match = re.search(r"\{.*\}", response.strip(), re.DOTALL)
-        if not json_match:
-            print(f"Error parsing response: No JSON object found in: {response[:200]}...")
-            return False
-    
-        json_str = json_match.group(0)
-        try:
-            result = json.loads(json_str)
-            answer_str = result.get("answer", "").strip().lower()
-            return answer_str == "yes"
-        except (json.JSONDecodeError, AttributeError) as e:
-            print(f"Error parsing response: {e}, Raw response: {response[:200]}...")
-            return False
+        response = response.lower()
+        if "yes" in response and "no" not in response:
+            predicted = True
+        else:
+            predicted = False
+        return predicted
 
     async def on_reset(self, cancellation_token: CancellationToken) -> None:
         """Reset the agent"""
