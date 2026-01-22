@@ -13,7 +13,7 @@ from autogen_core.models import (
     SystemMessage,
     UserMessage,
 )
-from openai import RateLimitError  # 请根据你的 SDK 版本确认异常路径
+from openai import RateLimitError
 import prompts
 import utils
 class ResponseSelectorAgentConfig(BaseModel):
@@ -63,55 +63,41 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
             return
         retrival_task = messages[-2].content
         task = messages[-1].content
-        system_prompt = """你是一个答案选择助手，任务是从给定选项中选出最正确的一个。
-        严格遵守以下规则：
-        1. 仅输出答案内容，必须包括答案的具体内容，不添加任何解释、推理或额外文本。
-        2. 必须基于用户提供的问题和检索到的上下文进行判断，答案不能为空。
-        """
         try:
             retrival_task_data = json.loads(retrival_task)
             retrieval_context = retrival_task_data["retrieval_context"]
-            task_data = json.loads(task)  # 解析 JSON 字符串为字典
+            task_data = json.loads(task)
             query = task_data.get("query")
             generated_answers = task_data.get("generated_answers")
-            remaining_answers = generated_answers[:]  # 做个副本避免修改原列表
+            remaining_answers = generated_answers[:]
             selected_answer = ""
             while len(remaining_answers) > 1:
                 try:
                     prompt = prompts.construct_select_prompt(query, remaining_answers, retrieval_context)
-                    system_message = SystemMessage(
-                        content=system_prompt,
-                        source="system"
-                    )
                     user_message = UserMessage(
                         content=prompt,
                         source="user"
                     )
                     model_result = await utils._call_model_with_rate_limit_retry(
                         model_client=self._model_client,
-                        messages=[system_message, user_message]
-                    )#调用大模型
-                    selected_answer = model_result.content
-                    for answer in remaining_answers:
-                        #提取answer中Answer: 后的内容
-                        answer_content = re.search(r"Answer:\s*(.*)", answer, re.IGNORECASE)
-                        if answer_content:
-                            answer_content = answer_content.group(1).strip()                           
-                            if selected_answer in answer_content:
-                                selected_answer = answer
-                                break
-                    
-                    break  # 成功选出，跳出循环
+                        messages=[user_message]
+                    )
+                    selected_index_in_current = self.extract_selected_answer_index(model_result.content)
+                    if 1 <= selected_index_in_current <= len(remaining_answers):
+                        selected_answer = remaining_answers[selected_index_in_current-1]
+                    else:
+                        selected_answer = remaining_answers[0]  # fallback
+    
+                    break
     
                 except Exception as e:
                     print(f"call_with_retry failed or parsing failed: {e}. Retrying with fewer answers...")
-                    # 移除最后一个答案
                     remaining_answers = remaining_answers[:-1]
         except json.JSONDecodeError as e:
-            print("JSON 解析错误:", e)
+            print("JSON load error:", e)
         except KeyError as e:
-            print("缺少必要的键:", e)
-        output = json.dumps({"query": query,"answer": selected_answer})
+            print("KeyError:", e)
+        output = json.dumps({"query": query,"answer": selected_answer,"model_result": model_result.content})
         yield Response(
             chat_message=TextMessage(content=output, source=self.name),
             inner_messages=[],
@@ -134,8 +120,8 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
         match = re.search(pattern_multiline, response, re.IGNORECASE)
         
         if match:
-            return int(match.group(1))        
-        return 1  # 默认返回第一个答案
+            return int(match.group(1))            
+        return 1
 
     async def on_reset(self, cancellation_token: CancellationToken) -> None:
         """Reset the agent"""

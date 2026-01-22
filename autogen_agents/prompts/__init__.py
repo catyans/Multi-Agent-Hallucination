@@ -51,13 +51,32 @@ def construct_select_prompt(query, generated_answers, retrieval_context):
     Returns:
         str: Formatted prompt in English for the LLM.
     """
-    m = ""
+    prompt = f"Question: {query}\n\n"
+    prompt += "Candidate answers (each includes reasoning):\n"
     for i, answer in enumerate(generated_answers, 1):
-        m += f"答案 {i}:{answer}\n"
-    user_prompt = f"""用户的问题是：{query}
-            
-            请从以下答案中选择最正确的一个：{m}"""
-    return user_prompt.strip()
+        prompt += f"{i}. {answer}\n"
+    prompt += "\n"
+    prompt += '''
+Evaluate each answer based on:
+- How well it addresses the question,
+- The clarity and logical coherence of its reasoning,
+- Whether the conclusion follows from the reasoning,
+- Absence of contradictions or unsupported claims.
+
+First, analyze the reasoning and conclusion of each candidate.
+Then, compare them and explain why one is superior.
+
+After completing your reasoning, please output the result in the following strict format:
+
+Reasoning:
+
+(Provide your detailed step-by-step analysis here)
+
+Final Answer:
+
+(Only output the numeric index corresponding to the correct answer, e.g., 1, 2, 3, etc.)
+'''
+    return prompt.strip()
 
 def construct_validate_prompt(query, retrieval_context, answer):
     """

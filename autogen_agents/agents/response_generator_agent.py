@@ -118,17 +118,13 @@ class ResponseGeneratorAgent(BaseChatAgent, Component[ResponseGeneratorAgentConf
         prompt = prompts.construct_generate_prompt(task, retrieval_context)
         for i in range(self._num_versions):
             async def call_model(prompt):
-                system_message = SystemMessage(
-                    content="You are a helpful assistant.",
-                    source="system"
-                )
                 user_message = UserMessage(
                     content=prompt,
                     source="user"
                 )
                 model_result = await utils._call_model_with_rate_limit_retry(
                     model_client=self._model_client,
-                    messages=[system_message, user_message]
+                    messages=[user_message]
                 )
                 return model_result
             # Wrap async call into task

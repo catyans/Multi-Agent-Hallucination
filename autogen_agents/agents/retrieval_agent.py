@@ -36,6 +36,8 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
         num_versions: int = 5,
         retrieval_num: int = 20,
         index_path="../bm25.pkl",
+        enable_bm25 = False,
+        enable_decompose = False
     ):
         super().__init__(name=name, description=description)
         self._model_client = model_client
@@ -47,6 +49,8 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
             bm25_data = pickle.load(f)
             self._bm25_retriever = bm25_data["bm25"]
             self._bm25_chunks = bm25_data["chunks"]
+        self.enable_bm25 = enable_bm25
+        self.enable_decompose = enable_decompose
 
     @property
     def produced_message_types(self) -> Sequence[type[BaseChatMessage]]:
@@ -76,42 +80,35 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
             return
             
         task = messages[-1].content
-        prompt = prompts.construct_decompose_prompt(task)
-        system_message = SystemMessage(
-            content="You are a helpful assistant.",
-            source="system"
-        )
-        user_message = UserMessage(
-            content=prompt,
-            source="user"
-        )
-        model_result = await utils._call_model_with_rate_limit_retry(
-            model_client=self._model_client,
-            messages=[system_message, user_message]
-        )
-        output = model_result.content
-        match = re.search(r"```json\s*(\{.*\})\s*```", output, re.DOTALL)
-        if match:
-            output = match.group(1)
-        try:
-            sub_questions = json.loads(output)["sub_questions"]
-        except json.JSONDecodeError:
-            sub_questions = []
-        # === 过滤：只保留词数 <= 300 的项 ===
-        filtered_sub_questions = []
-        for question in sub_questions:
-            if isinstance(question, str):
-                word_count = len(question.split())
-                if word_count <= 300:
-                    filtered_sub_questions.append(question)
-            else:
-                # 非字符串跳过
-                pass
-        # 只保留两项
-        if len(filtered_sub_questions) > 2:
-            filtered_sub_questions = filtered_sub_questions[:2]
-        sub_questions = filtered_sub_questions
-        # 添加原始问题
+        sub_questions = []
+        if self.enable_decompose:
+            prompt = prompts.construct_decompose_prompt(task)
+            user_message = UserMessage(
+                content=prompt,
+                source="user"
+            )
+            model_result = await utils._call_model_with_rate_limit_retry(
+                model_client=self._model_client,
+                messages=[user_message]
+            )
+            output = model_result.content
+            match = re.search(r"```json\s*(\{.*\})\s*```", output, re.DOTALL)
+            if match:
+                output = match.group(1)
+            try:
+                data = json.loads(output)
+                sub_questions = data.get("sub_questions", [])
+            except json.JSONDecodeError:
+                sub_questions = []
+            filtered_sub_questions = []
+            for question in sub_questions:
+                if isinstance(question, str):
+                    word_count = len(question.split())
+                    if word_count <= 300:
+                        filtered_sub_questions.append(question)
+            if len(filtered_sub_questions) > 2:
+                filtered_sub_questions = filtered_sub_questions[:2]
+            sub_questions = filtered_sub_questions
         sub_questions.append(task)
         retrieval_context = await self._query_and_process(sub_questions)
         output_json = json.dumps({
@@ -125,46 +122,36 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
 
     async def bm25_retrieve(self, query: str, k: int = 20) -> List[Dict]:
         """Retrieve documents using BM25"""
-            # 查询转小写并分词
         tokenized_query = query.lower().split()
-
-        # 计算分数
         scores = self._bm25_retriever.get_scores(tokenized_query)
-
-        # 获取 top-k 结果
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
-
         results = []
         for idx in top_indices:
-            if scores[idx] > 0:  # 过滤无相关性结果
+            if scores[idx] > 0:
                 results.append(self._bm25_chunks[idx]["original"])
         return results
 
     async def _query_and_process(self, questions: List[str]) -> str:
         """Query memory and generate multiple shuffled versions of the context"""
         query_results_list = await asyncio.gather(*[self._memory.query(query) for query in questions])
-        #query_results_list转换成str数组[[str]]
         for i, query_result in enumerate(query_results_list):
             if query_result.results:
                 query_results_list[i] = [item.content for item in query_result.results]
-        bm25_results_list = await asyncio.gather(*[self.bm25_retrieve(query, self.retrieval_num) for query in questions])
-        query_results_list.extend(bm25_results_list)
-        seen_contents = set()  # 用于去重 content
-        index = 0              # 当前轮询的层级（第 index 个元素）
+        if self.enable_bm25:
+            bm25_results_list = await asyncio.gather(*[self.bm25_retrieve(query, self.retrieval_num) for query in questions])
+            query_results_list.extend(bm25_results_list)
+        seen_contents = set()
+        index = 0
         while len(seen_contents) < self.retrieval_num:
             for query_result in query_results_list:
                 if not query_result or index >= len(query_result):
                     continue       
                 content = query_result[index]        
-                # 确保 content 是字符串
                 if not isinstance(content, str):
                     content = str(content)       
-                # 如果 content 已存在，跳过（不计数）
                 if content in seen_contents:
                     continue       
-                # 添加唯一内容
                 seen_contents.add(content)      
-                # 达到 k 个就立即退出
                 if len(seen_contents) >= self.retrieval_num:
                     break       
             index += 1

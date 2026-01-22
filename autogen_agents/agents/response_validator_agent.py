@@ -11,7 +11,7 @@ from autogen_core.models import (
     SystemMessage,
     UserMessage,
 )
-from openai import RateLimitError  # 请根据你的 SDK 版本确认异常路径
+from openai import RateLimitError
 import re
 import utils
 import prompts
@@ -29,12 +29,12 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
         name: str,
         description: str = "A response validator agent that validates the response of a model.",
         model_client=None,
-        count: int = 3,
+        max_retries: int = 3,
     ):
         super().__init__(name=name, description=description)
         self._model_client = model_client
-        self._initial_count = count
-        self._count = count
+        self._max_retries = max_retries
+        self._count = max_retries
         self.terminate_word = "TERMINATE:"
 
     @property
@@ -70,11 +70,11 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
         try:
             retrival_task_data = json.loads(retrival_task)
             retrieval_context = retrival_task_data.get("retrieval_context", [])  # 默认为空列表
-            task_data = json.loads(task)  # 解析 JSON 字符串为字典
+            task_data = json.loads(task)
             query = task_data.get("query")
             answer = task_data.get("answer")
             if self._count == 0:
-                self._count = self._initial_count
+                self._count = self._max_retries
                 yield Response(
                     chat_message=TextMessage(content=self.terminate_word+answer, source=self.name),
                     inner_messages=[],
@@ -87,15 +87,15 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
             )
             model_result = await utils._call_model_with_rate_limit_retry(
                 model_client=self._model_client,
-                messages=[ user_message]
+                messages=[user_message]
             )
             judgment = self.extract_answer_as_bool(model_result.content)
         except json.JSONDecodeError as e:
-            print("JSON 解析错误:", e)
+            print("JSON load error:", e)
         except KeyError as e:
-            print("缺少必要的键:", e)
+            print("Key error:", e)
         if judgment:
-            self._count = self._initial_count
+            self._count = self._max_retries
             output = self.terminate_word+answer
         else:
             output = query

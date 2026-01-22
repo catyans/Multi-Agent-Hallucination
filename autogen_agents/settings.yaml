@@ -2,7 +2,7 @@ llm:
   model: Qwen2.5-7B-Instruct
   api_key: "-"
   base_url: http://0.0.0.0:8000/v1
-  base_url_lora: http://0.0.0.0:8001/v1
+  base_url_lora: http://0.0.0.0:8000/v1
   lora_name_selector: selector
   lora_name_validator: validator
 # Vector store settings
@@ -12,20 +12,17 @@ vector_store:
   collection_name: bge-m3
   k: 5
   score_threshold: 0.1
-  bm25_index_path: "./bm25.pkl"
   # Embedding function settings
   embedding:
     use_custom: true
     api_key: 
     model: BAAI/bge-m3
     api_base: 
-
-# Document indexing settings
-document_indexing:
-  chunk_size: 1024
-  reindex: false
-
-# RAG settings
-rag:
+retrieval_agent:
+  bm25_index_path: "./bm25.pkl"
+  enable_bm25: true
+  enable_decompose: true
+generator_agent:
   num_versions: 5
+validator_agent:
   max_retries: 3
