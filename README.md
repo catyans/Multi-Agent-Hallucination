@@ -1,6 +1,6 @@
 # MACF-RAG
 > a novel framework that addresses hallucination through a three-stage pipeline: Generate, Select, and Validate. Our approach employs specialized agents at each stage, with the selector trained via Direct Preference Optimization (DPO) and the validator fine-tuned with supervised learning to ensure factual consistency. 
-![alt text](imgs/f4f6d262-f61b-42d2-91bc-5090f5c422da.png)
+![alt text](imgs/pipeline_overview.png)
 
 
 ---
@@ -182,12 +182,12 @@ python main.py
 ## Results
 
 End-to-end accuracy (%) on three multi-hop QA benchmarks. Best results in bold.
-![alt text](imgs/d67e926d-d128-4148-acdf-9c5c4ffcf1b1.png)
+![alt text](imgs/figure1.png)
 
 Stage-wise accuracy (%) showing progressive improvement through the pipeline (Qwen2.5-7B).
-![alt text](imgs/6e9f1d73-94aa-4ff3-97cb-29b0ecc374ff.png)
+![alt text](imgs/figure2.png)
 
 Results with Mistral-7B as the base generator, showing generalization across different LLM backbones.
-![alt text](imgs/dc7f06f1-9c34-4794-97ee-82f40f7de73a.png)
+![alt text](imgs/figure3.png)
 
 
