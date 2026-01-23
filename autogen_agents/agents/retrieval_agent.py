@@ -11,10 +11,8 @@ from typing_extensions import Self
 import re
 import pickle
 from autogen_core.models import (
-    SystemMessage,
     UserMessage,
 )
-from openai import RateLimitError
 import prompts
 import utils
 class RetrievalAgentConfig(BaseModel):
@@ -128,7 +126,7 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
         results = []
         for idx in top_indices:
             if scores[idx] > 0:
-                results.append(self._bm25_chunks[idx]["original"])
+                results.append(self._bm25_chunks[idx]["original"])#original content
         return results
 
     async def _query_and_process(self, questions: List[str]) -> str:

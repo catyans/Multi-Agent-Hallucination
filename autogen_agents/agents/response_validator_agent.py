@@ -8,10 +8,8 @@ from autogen_core import CancellationToken, Component
 from pydantic import BaseModel
 from typing_extensions import Self
 from autogen_core.models import (
-    SystemMessage,
     UserMessage,
 )
-from openai import RateLimitError
 import re
 import utils
 import prompts
