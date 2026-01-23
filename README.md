@@ -9,7 +9,7 @@
 ```bash
 # remember clone this repo first
 cd MACF-RAG
-pip install -e .
+pip install -r requirements.txt
 ```
 ## Data Process
 The input file data/qa_and_corpus.json should be a list of objects with the following format:
@@ -26,7 +26,7 @@ The input file data/qa_and_corpus.json should be a list of objects with the foll
 ### Step 1: 
 split data into qa.json and corpus.json
 ```python
-input_file = "data/qa_and_corpus.json"
+input_file = "data/qa&corpus.json"
 qa_output = "data/qa.json"
 corpus_output = "data/corpus.json"
 seen_texts = set()
@@ -53,7 +53,7 @@ with open(corpus_output, 'w', encoding='utf-8') as fcorpus:
     json.dump(corpus_list, fcorpus, ensure_ascii=False, indent=2)
 ```
 ### Step 2: 
-index corpus.json into ChromaDB
+index corpus.json into ChromaDB. Before indexing, configure persistence_path, collection_name, and embedding settings (e.g., model, api_key, api_base) in your vector store config.
 ```python
 from transformers import AutoTokenizer
 from autogen_core.memory import Memory, MemoryContent, MemoryMimeType
@@ -73,14 +73,8 @@ class TokenBasedDocumentIndexer:
 
     def __init__(
         self,
-        model_name: str = "model",
-        max_tokens: int = 1200,
-        overlap_tokens: int = 100,
-        trust_remote_code: bool = True,
         memory: Memory = None,
     ):
-        self.max_tokens = max_tokens
-        self.overlap_tokens = overlap_tokens
         self.memory = memory
     
     async def index_documents(self, documents: List[str], max_concurrent: int = 10) -> int:
@@ -137,7 +131,7 @@ rag_memory = ChromaDBVectorMemory(config=vector_store_config)
 await rag_memory.clear()  # Clear existing memory
 async def index_autogen_docs() -> None:
     indexer = TokenBasedDocumentIndexer(memory=rag_memory)
-    input_file = "./corpus.json"
+    input_file = "./data/corpus.json"
     with open(input_file, 'r', encoding='utf-8') as f:
         sources = json.load(f)
     #sources = [line['body'] for line in lines]

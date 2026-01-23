@@ -1,5 +1,5 @@
-input_file:
-output_file:
+input_file: .json
+output_file: .jsonl
 llm:
   model: Qwen2.5-7B-Instruct
   api_key: "-"
@@ -21,7 +21,7 @@ vector_store:
     model: BAAI/bge-m3
     api_base: 
 retrieval_agent:
-  bm25_index_path: ""
+  bm25_index_path: ".pkl"
   enable_bm25: false
   enable_decompose: true
 generator_agent:

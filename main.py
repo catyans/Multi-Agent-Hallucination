@@ -123,7 +123,7 @@ async def process_item_with_pool(
     team = None
     try:
         team = await team_pool.get()
-        query = data.get("query")
+        query = data.get("question")
         if not query:
             return {"line_num": line_num, "error": "lack 'query'", "status": "skipped"}
 
