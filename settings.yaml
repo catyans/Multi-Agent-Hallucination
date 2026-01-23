@@ -1,0 +1,30 @@
+input_file:
+output_file:
+llm:
+  model: Qwen2.5-7B-Instruct
+  api_key: "-"
+  base_url: http://0.0.0.0:8000/v1
+  base_url_lora: http://0.0.0.0:8000/v1
+  lora_name_selector: Qwen2.5-7B-Instruct
+  lora_name_validator: Qwen2.5-7B-Instruct
+# Vector store settings
+vector_store:
+  type: chromadb
+  persistence_path: 
+  collection_name: 
+  k: 5
+  score_threshold: 0.1
+  # Embedding function settings
+  embedding:
+    use_custom: true
+    api_key: 
+    model: BAAI/bge-m3
+    api_base: 
+retrieval_agent:
+  bm25_index_path: ""
+  enable_bm25: false
+  enable_decompose: true
+generator_agent:
+  num_versions: 5
+validator_agent:
+  max_retries: 3

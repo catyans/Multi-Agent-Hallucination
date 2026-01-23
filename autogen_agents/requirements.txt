@@ -1,4 +1,0 @@
-# Core dependencies for your RAG project
-autogen-agentchat
-autogen-ext[openai,azure,chromadb]
-rank-bm25
