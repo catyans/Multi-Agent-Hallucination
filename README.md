@@ -12,6 +12,16 @@ cd MACF-RAG
 pip install -e .
 ```
 ## Data Process
+The input file data/qa_and_corpus.json should be a list of objects with the following format:
+```json
+[
+  {
+    "question": "What is RAG?",
+    "answer": "Retrieval-Augmented Generation...",
+    "context": [["Introduction", ["RAG combines retrieval...", "..."]]]
+  }
+]
+```
 
 ### Step 1: 
 split data into qa.json and corpus.json

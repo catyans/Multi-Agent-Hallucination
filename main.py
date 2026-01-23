@@ -155,9 +155,9 @@ async def process_item_with_pool(
                 validator_answer = message.content[10:]
         return {
             "query": query,
-            "answer": data.get("answer"),
-            "question_type": data.get("question_type"),
-            "evidence_list": data.get("evidence_list"),
+            "answer": data.get("answer", ""),
+            "question_type": data.get("question_type", ""),
+            "evidence_list": data.get("evidence_list", []),
             "retrival_contexts": retrival_contexts,
             "generated_answers_list": generated_answers_list,
             "selected_answers": selected_answers,
