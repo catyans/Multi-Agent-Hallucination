@@ -1,5 +1,7 @@
-input_file: .json
-output_file: .jsonl
+data:
+  input_file: .json
+  output_file: .jsonl
+  team_pool_size: 3
 llm:
   model: Qwen2.5-7B-Instruct
   api_key: "-"

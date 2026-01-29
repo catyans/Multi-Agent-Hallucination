@@ -78,22 +78,7 @@ class ResponseGeneratorAgent(BaseChatAgent, Component[ResponseGeneratorAgentConf
         query = task_data["query"]
         retrieval_context = task_data["retrieval_context"]        
         # Process versions concurrently
-        results = await self._process_versions_concurrently(retrieval_context, query)
-        
-        # Extract answers
-        answers = []
-        for result in results:
-            if hasattr(result["response"], 'content'):
-                # Direct model response
-                answers.append(result["response"].content)
-            elif hasattr(result["response"], 'choices') and len(result["response"].choices) > 0:
-                # OpenAI-style response
-                answers.append(result["response"].choices[0].message.content)
-            else:
-                # Fallback
-                answers.append(str(result["response"]))
-        
-        # Create a JSON object containing both arrays
+        answers = await self._process_versions_concurrently(retrieval_context, query)
         output_json = json.dumps({
             "query": query,
             "generated_answers": answers
@@ -111,35 +96,25 @@ class ResponseGeneratorAgent(BaseChatAgent, Component[ResponseGeneratorAgentConf
 
     async def _process_versions_concurrently(self, retrieval_context: str, task: str) -> List[Dict]:
         """Process multiple versions concurrently"""
-        tasks = []
-        results = []
         prompt = prompts.construct_generate_prompt(task, retrieval_context)
-        for i in range(self._num_versions):
-            async def call_model(prompt):
-                user_message = UserMessage(
-                    content=prompt,
-                    source="user"
-                )
-                model_result = await utils._call_model_with_rate_limit_retry(
-                    model_client=self._model_client,
-                    messages=[user_message]
-                )
-                return model_result
-            # Wrap async call into task
-            task_coro = call_model(prompt)
-            tasks.append(task_coro)
+        user_message = UserMessage(
+            content=prompt,
+            source="user"
+        )
+        model_result = await utils._call_model_with_rate_limit_retry(
+            model_client=self._model_client,
+            messages=[user_message]
+        )
 
-            # Save context info for later assembly
-            results.append({
-                "version": i+1,
-                "response": None  # Placeholder
-            })
-        # Execute all tasks concurrently
-        responses = await asyncio.gather(*tasks)
-        # Fill responses into results
-        for i, response in enumerate(responses):
-            results[i]["response"] = response
-        return results
+        if self._num_versions == 1:
+            contents = [model_result.content]
+        else:
+            try:
+                parsed = json.loads(model_result.content)
+                contents = parsed.get("contents", [])
+            except (json.JSONDecodeError, TypeError):
+                contents = [model_result.content]      
+        return contents
     @classmethod
     def _from_config(cls, config: ResponseGeneratorAgentConfig) -> Self:
         return cls(

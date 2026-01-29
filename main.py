@@ -14,6 +14,7 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelInfo
 from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.teams import RoundRobinGroupChat
+from utils.custom_model_client import CustomModelClient
 from agents.retrieval_agent import RetrievalAgent
 from agents.response_generator_agent import ResponseGeneratorAgent
 from agents.response_validator_agent import ResponseValidatorAgent
@@ -24,14 +25,22 @@ print(now.strftime("%Y-%m-%d %H:%M:%S"))
 
 with open('settings.yaml', 'r') as f:
     config = yaml.safe_load(f)
-input_file = config.get("input_file")
-output_file = config.get("output_file")
+data_config = config.get("data", {})
+input_file = data_config.get("input_file")
+output_file = data_config.get("output_file")
+team_pool_size = data_config.get("team_pool_size", 3)
 llm_config = config['llm']
 model_client = OpenAIChatCompletionClient(
         model=llm_config['model'],
         model_info=ModelInfo(vision=False, function_calling=True, json_output=True, family="unknown", structured_output=True),
         api_key=os.environ.get('OPENAI_API_KEY', llm_config['api_key']),
         base_url=llm_config['base_url'],
+)
+generator_model_client = CustomModelClient(
+        model=llm_config['model'],
+        base_url=llm_config['base_url'],
+        api_key=os.environ.get('OPENAI_API_KEY', llm_config['api_key']),
+        n=config['generator_agent']['num_versions'],
 )
 selector_model_client = OpenAIChatCompletionClient(
         model=llm_config['lora_name_selector'],
@@ -94,7 +103,7 @@ async def create_team_pool(size: int) -> Queue:
         )
         generator_agent = ResponseGeneratorAgent(
             name='generator_agent',
-            model_client=model_client,
+            model_client=generator_model_client,
             memory=memory,
             num_versions=config['generator_agent']['num_versions']
         )
@@ -203,7 +212,7 @@ async def main():
         except Exception as e:
             print(f"⚠️ read output file error: {e}")
 
-    team_pool = await create_team_pool(3)
+    team_pool = await create_team_pool(team_pool_size)
 
     tasks = [
         process_item_with_pool(data, line_num, team_pool)
