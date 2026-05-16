@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import List, Dict, Sequence, AsyncGenerator
+from typing import List, Dict, Sequence, AsyncGenerator, Tuple
 from autogen_agentchat.agents import BaseChatAgent
 from autogen_agentchat.base import Response
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage, TextMessage
@@ -69,6 +69,11 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
             generated_answers = task_data.get("generated_answers")
             remaining_answers = generated_answers[:]
             selected_answer = ""
+            usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
             while len(remaining_answers) > 1:
                 try:
                     prompt = prompts.construct_select_prompt(query, remaining_answers, retrieval_context)
@@ -80,6 +85,9 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
                         model_client=self._model_client,
                         messages=[user_message]
                     )
+                    usage["prompt_tokens"] += model_result.usage.prompt_tokens
+                    usage["completion_tokens"] += model_result.usage.completion_tokens
+                    usage["total_tokens"] += model_result.usage.prompt_tokens + model_result.usage.completion_tokens
                     selected_index_in_current = self.extract_selected_answer_index(model_result.content)
                     if 1 <= selected_index_in_current <= len(remaining_answers):
                         selected_answer = remaining_answers[selected_index_in_current-1]
@@ -95,7 +103,7 @@ class ResponseSelectorAgent(BaseChatAgent, Component[ResponseSelectorAgentConfig
             print("JSON load error:", e)
         except KeyError as e:
             print("KeyError:", e)
-        output = json.dumps({"query": query,"answer": selected_answer,"model_result": model_result.content})
+        output = json.dumps({"query": query,"answer": selected_answer,"model_result": model_result.content, "usage": usage}, ensure_ascii=False)
         yield Response(
             chat_message=TextMessage(content=output, source=self.name),
             inner_messages=[],

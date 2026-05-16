@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 from openai import AsyncOpenAI
 from autogen_core.models import (
     SystemMessage,
@@ -28,7 +28,7 @@ class CustomModelClient:
             api_key=api_key,
         )
 
-    async def create(self, messages: List[Dict[str, str]]) -> CustomModelResponse:
+    async def create(self, messages: List[Dict[str, str]]) -> Tuple[CustomModelResponse, Dict[str, int]]:
         openai_messages: List[Dict[str, Any]] = []
         for msg in messages:
             content = msg.content
@@ -55,6 +55,13 @@ class CustomModelClient:
         }
 
         response = await self.client.chat.completions.create(**request_kwargs)
+        usage = {}
+        if response.usage is not None:
+            usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
         if self.n == 1:
             content = response.choices[0].message.content or ""
         else:
@@ -63,4 +70,4 @@ class CustomModelClient:
                 for choice in response.choices
             ]
             content = json.dumps({"contents": contents_list}, ensure_ascii=False)
-        return CustomModelResponse(content=content) 
+        return CustomModelResponse(content=content), usage

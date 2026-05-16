@@ -172,16 +172,3 @@ run main.py
 ```python
 python main.py
 ```
-
-## Results
-
-End-to-end accuracy (%) on three multi-hop QA benchmarks. Best results in bold.
-![alt text](imgs/figure1.png)
-
-Stage-wise accuracy (%) showing progressive improvement through the pipeline (Qwen2.5-7B).
-![alt text](imgs/figure2.png)
-
-Results with Mistral-7B as the base generator, showing generalization across different LLM backbones.
-![alt text](imgs/figure3.png)
-
-

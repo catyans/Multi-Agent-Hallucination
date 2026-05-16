@@ -20,6 +20,14 @@ Question: "{question}"
     prompt = prompt.format(question=task)
     return prompt
 
+def construct_bm25_keyword_prompt(task: str) -> str:
+    prompt = '''You are an expert at query understanding and keyword extraction. Given a user's question, your task is to extract the most important and informative keywords or short phrases that best represent the core intent and key entities of the question. These keywords will be used as a query for a sparse retrieval system (e.g., BM25), so prioritize content words (nouns, verbs, named entities) and avoid stop words, questions words (who, what, when, etc.), and overly generic terms unless they are essential.
+Output only the extracted keywords as a single line of space-separated terms—no explanations, no punctuation, no numbering.
+Question: {question}
+Keywords:'''
+    prompt = prompt.format(question=task)
+    return prompt
+
 def construct_generate_prompt(task: str, retrieval_context: str) -> str:
     prefix = '''Below is a question followed by context from different sources. Please answer the question based on the provided context.
 
@@ -79,20 +87,25 @@ Final Answer:
     return prompt.strip()
 
 def construct_validate_prompt(query, retrieval_context, answer):
-    """
-    Constructs a prompt in English to ask a LLM to judge if the answer 
-    can be derived from the retrieval results given the question.
-    
-    Args:
-        query (str): The user's query.
-        retrieval_context (list of str or str): Retrieved context snippets.
-        answer (str): The generated answer to evaluate.
-    
-    Returns:
-        str: Formatted prompt in English for the LLM.
-    """
-    instruction = "Judge whether the given selected answer (containing both thought process and the final deduced answer) is correct based on the query. Respond strictly with either yes or no."
-    input_content = f"Query: {query}\n\nSelected answer: {answer}"
+    instruction = """You are an expert evaluator. Your task is to judge whether the provided answer is correct based on the query and the given retrieval context.
+
+Please follow these steps strictly:
+1. **Analyze the Query**: Understand exactly what information is being requested.
+2. **Verify Reasoning**: Check if the thought process in the answer aligns logically with the facts found in the retrieval context.
+3. **Fact-Check**: Ensure every claim in the final answer is supported by the retrieval context. Identify any hallucinations or logical gaps.
+4. **Conclusion**: Based on your analysis, determine if the answer is fully correct.
+
+Output Format:
+- First, provide your detailed analysis and reasoning process.
+- Finally, on a new line, output strictly "### Verdict: yes" or "### Verdict: no"."""
+
+    input_content = f"""Context:
+{retrieval_context}
+
+Query: {query}
+
+Selected Answer:
+{answer}"""
+
     prompt = f"{instruction}\n\n{input_content}"
-    
     return prompt.strip()

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import List, Dict, Sequence, AsyncGenerator
+from typing import List, Dict, Sequence, AsyncGenerator, Tuple
 from autogen_agentchat.agents import BaseChatAgent
 from autogen_agentchat.base import Response
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage, TextMessage
@@ -31,6 +31,7 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
         model_client=None,
         memory: Memory = None,
         bm25_retriever=None,
+        summary_file_path: str = "chunks_with_summary.json",
         num_versions: int = 5,
         retrieval_num: int = 20,
         index_path="../bm25.pkl",
@@ -41,6 +42,10 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
         self._model_client = model_client
         self._memory = memory
         self._bm25_retriever = bm25_retriever
+        with open(summary_file_path, "r", encoding="utf-8") as f:
+            summary_data = json.load(f)
+            #这是一个json数组文件，比如“chunks_with_summary.json”，里面每行有一个json对象，每个json对象有"original"和"summary"两个字段
+            self._summary_dict = {item["original"]: item["summary"] for item in summary_data}
         self._num_versions = num_versions
         self.retrieval_num = retrieval_num
         with open(index_path, "rb") as f:
@@ -79,6 +84,8 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
             
         task = messages[-1].content
         sub_questions = []
+        usage = {}
+        
         if self.enable_decompose:
             prompt = prompts.construct_decompose_prompt(task)
             user_message = UserMessage(
@@ -90,6 +97,11 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
                 messages=[user_message]
             )
             output = model_result.content
+            usage = {
+                "prompt_tokens": model_result.usage.prompt_tokens,
+                "completion_tokens": model_result.usage.completion_tokens,
+                "total_tokens": model_result.usage.prompt_tokens + model_result.usage.completion_tokens,
+            }
             match = re.search(r"```json\s*(\{.*\})\s*```", output, re.DOTALL)
             if match:
                 output = match.group(1)
@@ -108,15 +120,34 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
                 filtered_sub_questions = filtered_sub_questions[:2]
             sub_questions = filtered_sub_questions
         sub_questions.append(task)
-        retrieval_context = await self._query_and_process(sub_questions)
+        usage["sub_questions"] = sub_questions
+        retrieval_context, usage = await self._query_and_process(sub_questions, usage)
         output_json = json.dumps({
             "query": task,
-            "retrieval_context": retrieval_context
+            "retrieval_context": retrieval_context,
+            "usage": usage
         }, ensure_ascii=False, indent=2)
         yield Response(
             chat_message=TextMessage(content=output_json, source=self.name),
             inner_messages=[],
         )
+
+    async def _extract_keywords(self, query: str) -> Tuple[str, Dict]:
+        """Extract keywords from the query using the model"""
+        prompt = prompts.construct_bm25_keyword_prompt(query)
+        user_message = UserMessage(
+            content=prompt,
+            source="user"
+        )
+        model_result = await utils._call_model_with_rate_limit_retry(
+            model_client=self._model_client,
+            messages=[user_message]
+        )
+        return model_result.content, {
+            "prompt_tokens": model_result.usage.prompt_tokens,
+            "completion_tokens": model_result.usage.completion_tokens,
+            "total_tokens": model_result.usage.prompt_tokens + model_result.usage.completion_tokens,
+        }
 
     async def bm25_retrieve(self, query: str, k: int = 20) -> List[Dict]:
         """Retrieve documents using BM25"""
@@ -128,15 +159,31 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
             if scores[idx] > 0:
                 results.append(self._bm25_chunks[idx])
         return results
-
-    async def _query_and_process(self, questions: List[str]) -> str:
+    
+    async def _query_and_process(self, questions: List[str], usage: Dict) -> Tuple[str, Dict]:
         """Query memory and generate multiple shuffled versions of the context"""
         query_results_list = await asyncio.gather(*[self._memory.query(query) for query in questions])
         for i, query_result in enumerate(query_results_list):
             if query_result.results:
                 query_results_list[i] = [item.content for item in query_result.results]
+        query_list = []
         if self.enable_bm25:
-            bm25_results_list = await asyncio.gather(*[self.bm25_retrieve(query, self.retrieval_num) for query in questions])
+            gather_results = await asyncio.gather(*[self._extract_keywords(query) for query in questions])
+            query_list = []
+            bm25_usage_list = []
+            for kw, bm25_usage in gather_results:
+                query_list.append(kw)
+                bm25_usage_list.append(bm25_usage)
+            for bm25_usage in bm25_usage_list:
+                usage["prompt_tokens"] += bm25_usage["prompt_tokens"]
+                usage["completion_tokens"] += bm25_usage["completion_tokens"]
+                usage["total_tokens"] += bm25_usage["total_tokens"]
+            query_list = [
+                f"{q} {k}" if k and str(k).strip() else q
+                for q, k in zip(questions, query_list)
+            ]
+            usage["query_list"] = query_list
+            bm25_results_list = await asyncio.gather(*[self.bm25_retrieve(query, self.retrieval_num) for query in query_list])
             query_results_list.extend(bm25_results_list)
         seen_contents = set()
         index = 0
@@ -163,7 +210,7 @@ class RetrievalAgent(BaseChatAgent, Component[RetrievalAgentConfig]):
             for i, text in enumerate(contents)
         )
 
-        return retrieval_context
+        return retrieval_context, usage
 
 
     async def on_reset(self, cancellation_token: CancellationToken) -> None:

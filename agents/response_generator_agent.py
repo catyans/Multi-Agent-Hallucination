@@ -1,7 +1,7 @@
 import asyncio
 import json
 import random
-from typing import List, Dict, Sequence, AsyncGenerator
+from typing import List, Dict, Sequence, AsyncGenerator, Tuple
 from autogen_agentchat.agents import BaseChatAgent
 from autogen_agentchat.base import Response
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage, TextMessage
@@ -78,10 +78,11 @@ class ResponseGeneratorAgent(BaseChatAgent, Component[ResponseGeneratorAgentConf
         query = task_data["query"]
         retrieval_context = task_data["retrieval_context"]        
         # Process versions concurrently
-        answers = await self._process_versions_concurrently(retrieval_context, query)
+        answers, usage = await self._process_versions_concurrently(retrieval_context, query)
         output_json = json.dumps({
             "query": query,
-            "generated_answers": answers
+            "generated_answers": answers,
+            "usage": usage
         }, ensure_ascii=False, indent=2)
         
         # Yield the final response with the JSON object
@@ -94,14 +95,14 @@ class ResponseGeneratorAgent(BaseChatAgent, Component[ResponseGeneratorAgentConf
         pass
 
 
-    async def _process_versions_concurrently(self, retrieval_context: str, task: str) -> List[Dict]:
+    async def _process_versions_concurrently(self, retrieval_context: str, task: str) -> Tuple[List[Dict], Dict[str, int]]:
         """Process multiple versions concurrently"""
         prompt = prompts.construct_generate_prompt(task, retrieval_context)
         user_message = UserMessage(
             content=prompt,
             source="user"
         )
-        model_result = await utils._call_model_with_rate_limit_retry(
+        model_result, usage = await utils._call_model_with_rate_limit_retry(
             model_client=self._model_client,
             messages=[user_message]
         )
@@ -114,7 +115,7 @@ class ResponseGeneratorAgent(BaseChatAgent, Component[ResponseGeneratorAgentConf
                 contents = parsed.get("contents", [])
             except (json.JSONDecodeError, TypeError):
                 contents = [model_result.content]      
-        return contents
+        return contents, usage
     @classmethod
     def _from_config(cls, config: ResponseGeneratorAgentConfig) -> Self:
         return cls(

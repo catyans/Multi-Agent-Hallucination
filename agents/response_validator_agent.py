@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import List, Dict, Sequence, AsyncGenerator
+from typing import List, Dict, Sequence, AsyncGenerator, Tuple
 from autogen_agentchat.agents import BaseChatAgent
 from autogen_agentchat.base import Response
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage, TextMessage
@@ -65,6 +65,7 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
             return
         retrival_task = messages[-3].content    
         task = messages[-1].content
+        judgment = False
         try:
             retrival_task_data = json.loads(retrival_task)
             retrieval_context = retrival_task_data.get("retrieval_context", [])  # 默认为空列表
@@ -106,11 +107,18 @@ class ResponseValidatorAgent(BaseChatAgent, Component[ResponseValidatorAgentConf
         if not response or not isinstance(response, str):
             print("Error parsing response: Empty or non-string response")
             return False
-        response = response.lower()
+        if "### Verdict: yes" in response:
+            predicted = True
+        elif "### Verdict: no" in response:
+            predicted = False
+        else:
+            # 处理解析失败的情况
+            predicted = False 
+        '''response = response.lower()
         if "yes" in response and "no" not in response:
             predicted = True
         else:
-            predicted = False
+            predicted = False'''
         return predicted
 
     async def on_reset(self, cancellation_token: CancellationToken) -> None:
